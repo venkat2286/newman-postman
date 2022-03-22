@@ -1,41 +1,166 @@
-# Maven
-# Build your Java project and run tests with Apache Maven.
-# Add steps that analyze code, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/java
-
 trigger:
 - master
+pr:
+- master
 
-pool:
-  vmImage: ubuntu-latest
+parameters:
+  - name: environment
+    type: string
+    default: devl
+    values:
+      - devl
+      - prod
 
-steps:
-- task: Maven@3
-  inputs:
-    mavenPomFile: 'pom.xml'
-    mavenOptions: '-Xmx3072m'
-    javaHomeOption: 'JDKVersion'
-    jdkVersionOption: '1.8'
-    jdkArchitectureOption: 'x64'
-    publishJUnitResults: true
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
-    goals: 'package'
+stages:
+- stage: PR_Verify
+  pool:
+    name: devops161-aws-ghns-integration-enablement-devl-useast1-vpn-ec2-AMZ_Linux2_Java_DevTools
+  jobs:
+    - job: PR_Verify
+      condition: eq(variables.isMain, false)
+      container:
+        image: maven:3-jdk-8
+      steps:
+      - task: Cache@2
+        inputs:
+          key: 'maven | "$(Agent.OS)" | **/pom.xml'
+          restoreKeys: |
+            maven | "$(Agent.OS)"
+            maven
+          path: $(MAVEN_CACHE_FOLDER)
+        displayName: Cache Maven local repo
 
-- task: Bash@3
-  displayName: "Run Postman tests"
-  inputs:
-    targetType: "inline"
-    script: |
-      #! /bin/bash
+#      - task: DownloadSecureFile@1
+#        name: 'settings'
+#        inputs:
+#          secureFile: 'settings.xml'
 
-      # ------------- Install Dependencies -------------
-      sudo apt-get upgrade -y
-      sudo npm install -g newman reporter
+      - task: Maven@3
+        inputs:
+          goals: 'install'
+          mavenPomFile: pom.xml
+          mavenOptions: '$(MAVEN_OPTS)'
+          options: '-s $(settings.secureFilePath) -gs $(settings.secureFilePath) -B -e'
+          javaHomeOption: 'JDKVersion'
+          mavenVersionOption: 'Default'
+          mavenAuthenticateFeed: false
+          effectivePomSkip: false
+          sonarQubeRunAnalysis: false
+          isJacocoCoverageReportXML: false
+          sqMavenPluginVersionChoice: 'pom'
+  displayName: 'PR Verify'
 
-      # ------------- Run Postman tests -------------
-      echo "Clearing tests folder"
-      sudo rm -rf newman/*
-      echo "Running Regression tests ..."
-      newman run automatedtesting/postman/template-api.postman_collection.json
-#      echo "Running Data Validation tests ..."
-#      newman run postman/Data_Validation_Tests.postman_collection.json -e postman/FakeRestAPI_Postman_environment.json --reporters cli,junit
+#- stage: ${{ parameters.environment }}_Build_And_Push_image_to_ecr
+#  pool:
+#    name: devops81-aws-supplymgmt-cost-forecasting-tracking-${{ parameters.environment }}-useast1-vpn-ec2-AMZ_Linux2_Java_DevTools
+#  condition: eq(variables.isMain, true)
+#  jobs:
+#    - job: ${{ parameters.environment }}_Build_And_Push_image_to_ecr
+#      container:
+#          image: maven:3-jdk-8
+#      steps:
+#        - task: Cache@2
+#          inputs:
+#            key: 'maven | "$(Agent.OS)" | **/pom.xml'
+#            restoreKeys: |
+#              maven | "$(Agent.OS)"
+#              maven
+#            path: $(MAVEN_CACHE_FOLDER)
+#          displayName: Cache Maven local repo
+#
+#        - task: DownloadSecureFile@1
+#          name: 'settings'
+#          inputs:
+#            secureFile: 'settings.xml'
+#        - task: Maven@3
+#          inputs:
+#            goals: 'install'
+#            mavenPomFile: pom.xml
+#            mavenOptions: '$(MAVEN_OPTS)'
+#            options: '-s $(settings.secureFilePath) -gs $(settings.secureFilePath) -B -e'
+#            javaHomeOption: 'JDKVersion'
+#            mavenVersionOption: 'Default'
+#            mavenAuthenticateFeed: false
+#            effectivePomSkip: false
+#            sonarQubeRunAnalysis: false
+#            isJacocoCoverageReportXML: false
+#            sqMavenPluginVersionChoice: 'pom'
+#
+#        - task: DockerInstaller@0
+#          displayName: 'Install Docker'
+#          inputs:
+#            dockerVersion: 18.06.3-ce
+#            releaseType: stable
+#        - task: Docker@2
+#          displayName: 'Docker Build'
+#          inputs:
+#            repository: $(imageName)
+#            command: build
+#            tags: |
+#              $(imageTag)
+#        - task: ECRPushImage@1
+#          displayName: 'Push Image to ECR'
+#          inputs:
+#              imageSource: imagename
+#              sourceImageName: $(imageName)
+#              sourceImageTag: $(imageTag)
+#              autoCreateRepository: true
+#              regionName: us-east-1
+#              repositoryName: $(imageName)
+#              pushTag: $(imageTag)
+#        - task: Bash@3
+#          displayName: 'Docker Remove Images'
+#          inputs:
+#            targetType: 'inline'
+#            script: |
+#              docker rmi $(${{ parameters.environment }}-account).dkr.ecr.us-east-1.amazonaws.com/$(imageName):$(imageTag)
+#              docker rmi $(imageName):$(imageTag)
+#            workingDirectory: '$(System.DefaultWorkingDirectory)'
+#  displayName: '${{ parameters.environment }} - Build and Pushing Docker Image To ECR'
+#
+#- stage: ${{ parameters.environment }}_create_update_stack
+#  pool:
+#    name: devops81-aws-supplymgmt-cost-forecasting-tracking-${{ parameters.environment }}-useast1-vpn-ec2-AMZ_Linux2_Java_DevTools
+#  condition: and(succeeded(), eq(variables.isMain, true))
+#  jobs:
+#  - job: '${{ parameters.environment }}_create_update_stack'
+#    displayName: '${{ parameters.environment }} - Create or Update stack'
+#    steps:
+#    - script: |
+#        python3 -m venv env
+#        source env/bin/activate
+#        pip3 install -U awscli jinja2 jinja2-cli pyyaml
+#        sudo echo 'ImageTag: $(imageTag)' >> variables/WebAppEcsFargate_${{ parameters.environment }}.yaml
+#        jinja2 WebAppEcsFargate.yaml variables/WebAppEcsFargate_${{ parameters.environment }}.yaml --format=yaml -o finalCfn.yaml
+#
+#        if ! aws cloudformation describe-stacks --region us-east-1 --stack-name $(stackName) ; then
+#          echo -e "\nStack does not exist, creating ..."
+#          aws cloudformation create-stack \
+#          --stack-name $(stackName) \
+#          --template-body file://finalCfn.yaml  \
+#          --region us-east-1
+#          # echo "Waiting for stack to be created ..."
+#          # aws cloudformation wait stack-create-complete \
+#          # --region us-east-1 \
+#          # --stack-name $(stackName)
+#        else
+#          echo -e "\nStack exists, attempting update ..."
+#          update_output=$(aws cloudformation update-stack --stack-name $(stackName) --template-body file://finalCfn.yaml  --region us-east-1)
+#          status=$?
+#          set -e
+#          echo "$update_output"
+#          if [ $status -ne 0 ] ; then
+#            # Don't fail for no-op update
+#            if [[ $update_output == *"ValidationError"* && $update_output == *"No updates"* ]] ; then
+#                echo -e "\nFinished create/update - no updates to be performed"
+#                exit 0
+#            else
+#                exit $status
+#            fi
+#          fi
+#          # echo "Waiting for stack to be updated ..."
+#          # aws cloudformation wait stack-update-complete \
+#          # --region us-east-1 \
+#          # --stack-name $(stackName)
+#        fi
+#  displayName: '${{ parameters.environment }} - Create or Update stack'
