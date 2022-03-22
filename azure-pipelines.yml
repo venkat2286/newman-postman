@@ -12,7 +12,7 @@ parameters:
       - prod
 
 stages:
-- stage: PR_Verify
+- stage: PR_Verify2
   pool:
     name: devops161-aws-ghns-integration-enablement-devl-useast1-vpn-ec2-AMZ_Linux2_Java_DevTools
   jobs:
